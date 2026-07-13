@@ -11785,10 +11785,19 @@ function renderNotifPanel() {
   // Personnel Tracker alerts
   try {
     const ptd = JSON.parse(localStorage.getItem('qrt-personnel') || '{"people":[],"travel":[]}');
-    const DOC_KEYS = ['passport','intDL','natDL','uaeVisa','ukraineVisa'];
-    const DOC_LABELS = {passport:'Passport',intDL:'Int. DL',natDL:'Nat. DL',uaeVisa:'UAE Visa',ukraineVisa:'Ukraine Visa'};
+    const DOC_KEYS = ['intDL','natDL','uaeVisa','ukraineVisa'];
+    const DOC_LABELS = {intDL:'Int. DL',natDL:'Nat. DL',uaeVisa:'UAE Visa',ukraineVisa:'Ukraine Visa'};
     let ptExpired = [], ptExpiring = [];
     ptd.people.forEach(p => {
+      // Passports (a person may hold more than one)
+      const pps = Array.isArray(p.passports) ? p.passports : (p.passport ? [p.passport] : []);
+      pps.forEach(pp => {
+        const exp = pp && pp.expiry; if (!exp) return;
+        const days = Math.round((new Date(exp) - new Date()) / 86400000);
+        const lbl = 'Passport' + (pp.nationality ? ' (' + pp.nationality + ')' : '');
+        if (days < 0) ptExpired.push(p.name + ' ' + lbl);
+        else if (days <= 90) ptExpiring.push(p.name + ' ' + lbl + ' (' + days + 'd)');
+      });
       DOC_KEYS.forEach(k => {
         const exp = p[k] && p[k].expiry; if (!exp) return;
         const days = Math.round((new Date(exp) - new Date()) / 86400000);
@@ -25343,8 +25352,33 @@ setTimeout(_purgeTopbar, 2500);
 'use strict';
 
 /* ── Storage helpers ──────────────────────────────────────────── */
-function ptLoad(){ var d=JSON.parse(localStorage.getItem('qrt-personnel')||'{"people":[],"travel":[]}'); if(!d.leaves) d.leaves=[]; return d; }
+function ptLoad(){ var d=JSON.parse(localStorage.getItem('qrt-personnel')||'{"people":[],"travel":[]}'); if(!d.leaves) d.leaves=[]; _ptMigratePassports(d); return d; }
 function ptSave(d){ localStorage.setItem('qrt-personnel', JSON.stringify(d)); }
+
+/* ── Multiple-passport helpers ────────────────────────────────── */
+/* People may hold more than one passport (dual nationality). The array
+   p.passports[] is the source of truth; p.passport is kept in sync with
+   the soonest-expiring one for backward compatibility with older code. */
+function _ppList(p){
+  if(p && Array.isArray(p.passports)) return p.passports.filter(function(x){ return x && (x.no||x.expiry||x.nationality); });
+  if(p && p.passport && (p.passport.no||p.passport.expiry)) return [p.passport];
+  return [];
+}
+function _ppPrimary(list){
+  var l = Array.isArray(list) ? list : _ppList(list);
+  if(!l.length) return null;
+  return l.slice().sort(function(a,b){ var ae=a.expiry||'9999-99-99', be=b.expiry||'9999-99-99'; return ae<be?-1:ae>be?1:0; })[0];
+}
+function _ptMigratePassports(d){
+  (d.people||[]).forEach(function(p){
+    if(!Array.isArray(p.passports)){
+      p.passports = (p.passport && (p.passport.no||p.passport.expiry)) ? [Object.assign({},p.passport)] : [];
+    }
+    var pr = _ppPrimary(p.passports);
+    p.passport = pr ? pr : {no:'',expiry:'',nationality:''};
+  });
+  return d;
+}
 
 /* ── Default seed data (mirrors the Excel) ───────────────────── */
 function ptSeed(){
@@ -25354,8 +25388,8 @@ function ptSeed(){
     {id:'QRT-001',name:'Mark Richards',   role:'CEO',         nationality:'British',  status:'Active', email:'m.richards@qrtpower.com',
      passport:{no:'123231792', expiry:'2028-06-15', nationality:'British'},
      intDL:{no:'',expiry:''},natDL:{no:'',expiry:''},uaeVisa:{type:'',expiry:''},ukraineVisa:{expiry:''}},
-    {id:'QRT-002',name:'Christopher Kent',role:'COO',         nationality:'British',  status:'Active', email:'c.kent@qrtpower.com',
-     passport:{no:'144639708', expiry:'2026-08-01', nationality:'British'},
+    {id:'QRT-002',name:'Christopher Kent',role:'COO',         nationality:'British / Irish',  status:'Active', email:'c.kent@qrtpower.com',
+     passports:[{no:'144639708', expiry:'2026-08-01', nationality:'British'},{no:'PA1234567', expiry:'2031-05-20', nationality:'Irish'}],
      intDL:{no:'',expiry:''},natDL:{no:'KENT9610248CM9MJ',expiry:'2027-11-01'},uaeVisa:{type:'Resident',expiry:'2027-03-15'},ukraineVisa:{expiry:'2026-09-01'}},
     {id:'QRT-003',name:'Christina Jones', role:'Senior PM',   nationality:'British',  status:'Active', email:'c.jones@qrtpower.com',
      passport:{no:'',expiry:''},intDL:{no:'',expiry:''},natDL:{no:'',expiry:''},uaeVisa:{type:'',expiry:''},ukraineVisa:{expiry:''}},
@@ -25366,9 +25400,9 @@ function ptSeed(){
      intDL:{no:'',expiry:''},natDL:{no:'92211767156',expiry:'2028-05-01'},uaeVisa:{type:'',expiry:''},ukraineVisa:{expiry:''}},
     {id:'QRT-006',name:'Hugo Berthelsen', role:'Engineer',    nationality:'Norwegian',status:'Active', email:'h.berthelsen@qrtpower.com',
      passport:{no:'',expiry:''},intDL:{no:'',expiry:''},natDL:{no:'',expiry:''},uaeVisa:{type:'',expiry:''},ukraineVisa:{expiry:''}},
-    {id:'QRT-007',name:'Nenard Pavic',    role:'Engineer',    nationality:'Croatian', status:'Active', email:'n.pavic@qrtpower.com',
-     passport:{no:'34119641',  expiry:'2027-09-10', nationality:'Croatian'},
-     intDL:{no:'',expiry:''},natDL:{no:'',expiry:''},uaeVisa:{type:'',expiry:''},ukraineVisa:{expiry:''}},
+    {id:'QRT-007',name:'Nenard Pavic',    role:'Engineer',    nationality:'Croatian / British', status:'Active', email:'n.pavic@qrtpower.com',
+     passports:[{no:'34119641',  expiry:'2027-09-10', nationality:'Croatian'},{no:'558210049', expiry:'2026-06-18', nationality:'British'}],
+     intDL:{no:'IDP-HR-0098',expiry:'2026-04-30'},natDL:{no:'',expiry:''},uaeVisa:{type:'',expiry:''},ukraineVisa:{expiry:''}},
   ];
   d.travel = [
     {id:_uid(),personId:'QRT-002',country:'Ukraine',entry:'2026-01-10',exit:'2026-03-04',purpose:'Management'},
@@ -25428,7 +25462,8 @@ function ptKPIs(){
   var people = d.people;
   var all_expiries = [];
   people.forEach(function(p){
-    ['passport','intDL','natDL','uaeVisa','ukraineVisa'].forEach(function(k){
+    _ppList(p).forEach(function(pp){ if(pp.expiry) all_expiries.push(pp.expiry); });
+    ['intDL','natDL','uaeVisa','ukraineVisa'].forEach(function(k){
       var exp = p[k] && (p[k].expiry||'');
       if(exp) all_expiries.push(exp);
     });
@@ -25499,7 +25534,8 @@ window.ptRenderMaster = function(){
     if(fs && p.status!==fs) return false;
     if(q && !(p.name+p.id+p.role).toLowerCase().includes(q.toLowerCase())) return false;
     if(fd){
-      var docs = ['passport','intDL','natDL','uaeVisa','ukraineVisa'].map(function(k){ return p[k]&&p[k].expiry||''; });
+      var docs = _ppList(p).map(function(pp){ return pp.expiry||''; })
+        .concat(['intDL','natDL','uaeVisa','ukraineVisa'].map(function(k){ return p[k]&&p[k].expiry||''; }));
       var st = docs.map(_docStatus);
       if(fd==='expired'  && !st.includes('expired'))  return false;
       if(fd==='expiring' && !st.includes('expiring') && !st.includes('expired')) return false;
@@ -25515,7 +25551,7 @@ window.ptRenderMaster = function(){
   }).join('');
 
   var rows = people.map(function(p){
-    var ov = ['passport','intDL','natDL','uaeVisa','ukraineVisa'].map(function(k){ return p[k]&&p[k].expiry||''; }).map(_docStatus);
+    var ov = _ppList(p).map(function(pp){ return pp.expiry||''; }).concat(['intDL','natDL','uaeVisa','ukraineVisa'].map(function(k){ return p[k]&&p[k].expiry||''; })).map(_docStatus);
     var overallSt = ov.includes('expired') ? 'expired' : ov.includes('expiring') ? 'expiring' : ov.every(function(s){return s==='valid';}) ? 'valid' : 'none';
     var ovBadge = overallSt==='none'?'<span style="color:rgba(255,255,255,.2)">—</span>':_statusPill('', overallSt==='valid'?'OK':overallSt.toUpperCase()==='EXPIRING'?'EXPIRING':'EXPIRED');
     if(overallSt!=='none'){ var synthDate = overallSt==='valid'?new Date(Date.now()+200*86400000).toISOString().slice(0,10): overallSt==='expiring'?new Date(Date.now()+30*86400000).toISOString().slice(0,10):'2020-01-01'; ovBadge=_statusPill(synthDate, overallSt==='valid'?'ALL OK':overallSt==='expiring'?'EXPIRING':'EXPIRED'); }
@@ -25532,7 +25568,7 @@ window.ptRenderMaster = function(){
       '<td style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.55)">'+p.role+'</td>'+
       '<td style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.45)">'+( p.nationality||'—')+'</td>'+
       '<td style="padding:10px 12px">'+stBadge+'</td>'+
-      '<td style="padding:10px 12px">'+_statusPill(p.passport&&p.passport.expiry||'')+'</td>'+
+      '<td style="padding:10px 12px">'+_statusPill(_ppPrimary(p)&&_ppPrimary(p).expiry||'')+(_ppList(p).length>1?' <span title="'+_ppList(p).length+' passports on file" style="font-size:9px;font-weight:800;color:rgba(255,141,0,.9);background:rgba(255,141,0,.14);border:1px solid rgba(255,141,0,.3);border-radius:4px;padding:1px 5px;vertical-align:middle">×'+_ppList(p).length+'</span>':'')+'</td>'+
       '<td style="padding:10px 12px">'+_statusPill(p.intDL&&p.intDL.expiry||'')+'</td>'+
       '<td style="padding:10px 12px">'+_statusPill(p.natDL&&p.natDL.expiry||'')+'</td>'+
       '<td style="padding:10px 12px">'+_statusPill(p.uaeVisa&&p.uaeVisa.expiry||'')+'</td>'+
@@ -25551,10 +25587,44 @@ window.ptRenderMaster = function(){
 /* ── Document tables ─────────────────────────────────────────── */
 window.ptRenderDocuments = function(){
   var d = ptLoad();
-  _renderDocTable('pt-doc-passports', d.people, 'passport', ['Doc No.','Nationality','Expiry','Days Left','Renew By']);
+  _renderPassportTable('pt-doc-passports', d.people);
   _renderDocTable('pt-doc-dl',        d.people, 'dl',       ['Int. DL No.','Int. Expiry','Nat. DL No.','Nat. Expiry']);
   _renderDocTable('pt-doc-visas',     d.people, 'visas',    ['UAE Visa Type','UAE Expiry','Ukraine Expiry']);
 };
+
+/* One row per passport — a person with dual nationality appears once per passport */
+function _renderPassportTable(elId, people){
+  var el = document.getElementById(elId); if(!el) return;
+  var headers = ['ID','Name','Passport No.','Nationality','Expiry','Days Left','Renew By','Status'];
+  var hdr = headers.map(function(h){
+    return '<th style="padding:9px 12px;font-size:11px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;border-bottom:1px solid rgba(255,255,255,.07)">'+h+'</th>';
+  }).join('');
+  var rows = [];
+  people.forEach(function(p){
+    var list = _ppList(p);
+    if(!list.length){
+      rows.push('<tr style="border-bottom:1px solid rgba(255,255,255,.04)">'+
+        '<td style="padding:10px 12px;font-size:12px;font-weight:700;color:rgba(255,141,0,.8)">'+p.id+'</td>'+
+        '<td style="padding:10px 12px;font-size:13px;font-weight:600;color:#fff;white-space:nowrap;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,141,0,.3)" onclick="ptOpenPersonDetail(\''+p.id+'\')">'+p.name+'</td>'+
+        '<td colspan="5" style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.25)">No passport on file</td>'+
+        '<td style="padding:10px 12px">'+_statusPill('')+'</td></tr>');
+      return;
+    }
+    list.slice().sort(function(a,b){ var ae=a.expiry||'9999',be=b.expiry||'9999'; return ae<be?-1:ae>be?1:0; }).forEach(function(pp,i){
+      var days = pp.expiry ? _daysUntil(pp.expiry) : null;
+      rows.push('<tr style="border-bottom:1px solid rgba(255,255,255,.04)">'+
+        '<td style="padding:10px 12px;font-size:12px;font-weight:700;color:rgba(255,141,0,.8)">'+(i===0?p.id:'')+'</td>'+
+        '<td style="padding:10px 12px;font-size:13px;font-weight:600;color:#fff;white-space:nowrap;cursor:pointer;'+(i>0?'opacity:.5':'')+'" onclick="ptOpenPersonDetail(\''+p.id+'\')">'+(i===0?p.name:'↳')+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.6)">'+(pp.no||'—')+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.45)">'+(pp.nationality||'—')+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.6)">'+_fmt(pp.expiry)+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;font-weight:700;color:'+(days===null?'rgba(255,255,255,.3)':days<0?'#ef4444':days<=90?'#F5C518':'#22c55e')+'">'+(days===null?'—':Math.abs(days)+'d '+(days<0?'ago':'left'))+'</td>'+
+        '<td style="padding:10px 12px;font-size:12px;color:rgba(255,255,255,.4)">'+_fmt(_renewBy(pp.expiry))+'</td>'+
+        '<td style="padding:10px 12px">'+_statusPill(pp.expiry)+'</td></tr>');
+    });
+  });
+  el.innerHTML='<div style="overflow-x:auto;border-radius:12px;border:1px solid rgba(255,255,255,.06);overflow:hidden"><table style="width:100%;border-collapse:collapse;min-width:760px"><thead><tr style="background:rgba(255,255,255,.03)">'+hdr+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+}
 
 function _renderDocTable(elId, people, type, headers){
   var el = document.getElementById(elId); if(!el) return;
@@ -25802,6 +25872,39 @@ function _sel(id,label,val,opts){
 }
 function _v(id){ var el=document.getElementById('pt-fi-'+id); return el?(el.value||''):''; }
 
+/* ── Repeatable passport rows (multiple passports / dual nationality) ── */
+function _ppRow(pp){
+  pp = pp || {};
+  return '<div class="pt-pp-row" style="display:grid;grid-template-columns:1fr 1fr 1fr 34px;gap:0 10px;align-items:end;margin-bottom:2px">'+
+    '<div style="margin-bottom:12px"><label style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.07em;display:block;margin-bottom:6px">Passport No.</label>'+
+      '<input class="pt-pp-no" type="text" value="'+(pp.no||'')+'" style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#fff;padding:9px 11px;font-size:13px;font-family:Barlow,sans-serif"></div>'+
+    '<div style="margin-bottom:12px"><label style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.07em;display:block;margin-bottom:6px">Nationality</label>'+
+      '<input class="pt-pp-nat" type="text" value="'+(pp.nationality||'')+'" style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#fff;padding:9px 11px;font-size:13px;font-family:Barlow,sans-serif"></div>'+
+    '<div style="margin-bottom:12px"><label style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.07em;display:block;margin-bottom:6px">Expiry</label>'+
+      '<input class="pt-pp-exp" type="date" value="'+(pp.expiry||'')+'" style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#fff;padding:9px 11px;font-size:13px;font-family:Barlow,sans-serif"></div>'+
+    '<button type="button" title="Remove passport" onclick="this.closest(\'.pt-pp-row\').remove()" style="margin-bottom:12px;height:38px;background:transparent;border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#ef4444;cursor:pointer;font-size:14px">✕</button>'+
+  '</div>';
+}
+function _ppRowsHTML(list){
+  list = (list && list.length) ? list : [{}];
+  return '<div id="pt-pp-rows">'+list.map(_ppRow).join('')+'</div>'+
+    '<button type="button" class="btn btn-xs" style="margin-top:2px" onclick="ptAddPassportRow()">+ Add another passport</button>';
+}
+window.ptAddPassportRow = function(){
+  var c=document.getElementById('pt-pp-rows'); if(!c) return;
+  var tmp=document.createElement('div'); tmp.innerHTML=_ppRow({}); c.appendChild(tmp.firstChild);
+};
+function _collectPassports(){
+  var out=[]; var c=document.getElementById('pt-pp-rows'); if(!c) return out;
+  c.querySelectorAll('.pt-pp-row').forEach(function(row){
+    var no=(row.querySelector('.pt-pp-no')||{}).value||'';
+    var nat=(row.querySelector('.pt-pp-nat')||{}).value||'';
+    var exp=(row.querySelector('.pt-pp-exp')||{}).value||'';
+    if(no||nat||exp) out.push({no:no,nationality:nat,expiry:exp});
+  });
+  return out;
+}
+
 window.ptOpenAddPerson = function(){
   var newId = 'QRT-'+(String(ptLoad().people.length+1).padStart(3,'0'));
   _ptModal('Add Person',
@@ -25817,11 +25920,9 @@ window.ptOpenAddPerson = function(){
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px">'+
     _inp('ec-name','Name','')+_inp('ec-phone','Phone','')+_inp('ec-relation','Relationship','')+
     '</div>'+
-    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Passport</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px">'+
-    _inp('pp-no','Passport No.','')+_inp('pp-nat','Nationality (Passport)','')+_inp('pp-exp','Expiry Date','','date')+
-    '</div>'+
-    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Driving Licences</div>'+
+    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Passports <span style="color:rgba(255,255,255,.3);text-transform:none;letter-spacing:0">(add more than one for dual nationality)</span></div>'+
+    _ppRowsHTML([])+
+    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Driving Licences <span style="color:rgba(255,255,255,.3);text-transform:none;letter-spacing:0">(national &amp; international)</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0 12px">'+
     _inp('intdl-no','Int. DL No.','')+_inp('intdl-exp','Int. DL Expiry','','date')+
     _inp('natdl-no','Nat. DL No.','')+_inp('natdl-exp','Nat. DL Expiry','','date')+
@@ -25833,13 +25934,15 @@ window.ptOpenAddPerson = function(){
     '</div>',
   function(){
     var d=ptLoad();
+    var _pps=_collectPassports();
     d.people.push({
       id:_v('id'),name:_v('name'),role:_v('role'),nationality:_v('nationality'),status:_v('status'),email:_v('email'),
       residenceCountry:_v('residenceCountry'),
       legalBasis:_v('legalBasis')||'Contract',
       startDate:_v('startDate'),birthday:_v('birthday'),
       emergencyContact:{name:_v('ec-name'),phone:_v('ec-phone'),relation:_v('ec-relation')},
-      passport:{no:_v('pp-no'),expiry:_v('pp-exp'),nationality:_v('pp-nat')},
+      passports:_pps,
+      passport:_ppPrimary(_pps)||{no:'',expiry:'',nationality:''},
       intDL:{no:_v('intdl-no'),expiry:_v('intdl-exp')},
       natDL:{no:_v('natdl-no'),expiry:_v('natdl-exp')},
       uaeVisa:{type:_v('uaevisa-type'),expiry:_v('uaevisa-exp')},
@@ -25869,11 +25972,9 @@ window.ptOpenEditPerson = function(pid){
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px">'+
     _inp('ec-name','Name',ec.name||'')+_inp('ec-phone','Phone',ec.phone||'')+_inp('ec-relation','Relationship',ec.relation||'')+
     '</div>'+
-    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Passport</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px">'+
-    _inp('pp-no','Passport No.',(p.passport||{}).no)+_inp('pp-nat','Nationality (Passport)',(p.passport||{}).nationality)+_inp('pp-exp','Expiry Date',(p.passport||{}).expiry,'date')+
-    '</div>'+
-    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Driving Licences</div>'+
+    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Passports <span style="color:rgba(255,255,255,.3);text-transform:none;letter-spacing:0">(add more than one for dual nationality)</span></div>'+
+    _ppRowsHTML(_ppList(p))+
+    '<div style="font-size:11px;font-weight:700;color:rgba(255,141,0,.7);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 10px">Driving Licences <span style="color:rgba(255,255,255,.3);text-transform:none;letter-spacing:0">(national &amp; international)</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0 12px">'+
     _inp('intdl-no','Int. DL No.',(p.intDL||{}).no)+_inp('intdl-exp','Int. DL Expiry',(p.intDL||{}).expiry,'date')+
     _inp('natdl-no','Nat. DL No.',(p.natDL||{}).no)+_inp('natdl-exp','Nat. DL Expiry',(p.natDL||{}).expiry,'date')+
@@ -25887,13 +25988,15 @@ window.ptOpenEditPerson = function(pid){
     var idx=d.people.findIndex(function(x){return x.id===pid;});
     if(idx<0) return;
     var existing = d.people[idx]||{};
+    var _pps=_collectPassports();
     d.people[idx]={
       id:_v('id'),name:_v('name'),role:_v('role'),nationality:_v('nationality'),status:_v('status'),email:_v('email'),
       residenceCountry:_v('residenceCountry'),
       legalBasis:_v('legalBasis')||existing.legalBasis||'Contract',
       startDate:_v('startDate'),birthday:_v('birthday'),
       emergencyContact:{name:_v('ec-name'),phone:_v('ec-phone'),relation:_v('ec-relation')},
-      passport:{no:_v('pp-no'),expiry:_v('pp-exp'),nationality:_v('pp-nat')},
+      passports:_pps,
+      passport:_ppPrimary(_pps)||{no:'',expiry:'',nationality:''},
       intDL:{no:_v('intdl-no'),expiry:_v('intdl-exp')},
       natDL:{no:_v('natdl-no'),expiry:_v('natdl-exp')},
       uaeVisa:{type:_v('uaevisa-type'),expiry:_v('uaevisa-exp')},
@@ -25965,14 +26068,17 @@ window.ptDeleteTravel = function(tid){
 /* ── CSV Export ──────────────────────────────────────────────── */
 window.ptExportCSV = function(){
   var d=ptLoad();
-  var lines=['ID,Name,Role,Nationality,Status,Email,Passport No,Passport Expiry,Int DL No,Int DL Expiry,Nat DL No,Nat DL Expiry,UAE Visa Type,UAE Visa Expiry,Ukraine Visa Expiry'];
+  var lines=['ID,Name,Role,Nationality,Status,Email,Passport No,Passport Expiry,Int DL No,Int DL Expiry,Nat DL No,Nat DL Expiry,UAE Visa Type,UAE Visa Expiry,Ukraine Visa Expiry,All Passports (no|nationality|expiry; …)'];
   d.people.forEach(function(p){
+    var primary=_ppPrimary(p)||{};
+    var allPp=_ppList(p).map(function(x){return [x.no||'',x.nationality||'',x.expiry||''].join('|');}).join('; ');
     lines.push([p.id,p.name,p.role,p.nationality,p.status,p.email,
-      (p.passport||{}).no,(p.passport||{}).expiry,
+      primary.no,primary.expiry,
       (p.intDL||{}).no,(p.intDL||{}).expiry,
       (p.natDL||{}).no,(p.natDL||{}).expiry,
       (p.uaeVisa||{}).type,(p.uaeVisa||{}).expiry,
-      (p.ukraineVisa||{}).expiry
+      (p.ukraineVisa||{}).expiry,
+      allPp
     ].map(function(v){return '"'+(v||'')+'"';}).join(','));
   });
   var blob=new Blob([lines.join('\n')],{type:'text/csv'});
@@ -25983,7 +26089,7 @@ window.ptExportCSV = function(){
 window.ptOpenImportCSV = function(){
   _ptModal('Import People from CSV',
     '<div style="margin-bottom:10px;font-size:12px;color:rgba(255,255,255,.45)">Expected columns (header row required):<br>'+
-    '<code style="font-size:11px;color:rgba(255,141,0,.7)">ID, Name, Role, Nationality, Status, Email, Passport No, Passport Expiry, Int DL No, Int DL Expiry, Nat DL No, Nat DL Expiry, UAE Visa Type, UAE Visa Expiry, Ukraine Visa Expiry</code></div>'+
+    '<code style="font-size:11px;color:rgba(255,141,0,.7)">ID, Name, Role, Nationality, Status, Email, Passport No, Passport Expiry, Int DL No, Int DL Expiry, Nat DL No, Nat DL Expiry, UAE Visa Type, UAE Visa Expiry, Ukraine Visa Expiry, All Passports</code><br><span style="color:rgba(255,255,255,.35)">Optional last column for dual nationality: <code style="font-size:10px;color:rgba(255,141,0,.6)">no|nationality|expiry; no|nationality|expiry</code></span></div>'+
     '<div style="margin-bottom:10px">'+
       '<label style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.07em;display:block;margin-bottom:6px">Upload .csv file</label>'+
       '<input id="pt-fi-csvfile" type="file" accept=".csv,text/csv" style="font-size:12px;color:rgba(255,255,255,.6)">'+
@@ -26019,13 +26125,25 @@ window.ptOpenImportCSV = function(){
         if(!name){ skipped++; return; }
         if(!id) id='QRT-'+(String(d.people.length+added+1).padStart(3,'0'));
         if(d.people.find(function(x){return x.id===id;})){ skipped++; return; }
+        var _clean=function(s){ return (s||'').replace(/^"|"$/g,'').trim(); };
+        var _nat=_clean(cols[3]);
+        // Multiple passports: prefer the "All Passports" column if present, else the single primary columns
+        var _ppCol=_clean(cols[15]);
+        var _passports;
+        if(_ppCol){
+          _passports=_ppCol.split(';').map(function(s){ var pr=s.split('|'); return {no:(pr[0]||'').trim(),nationality:(pr[1]||'').trim(),expiry:(pr[2]||'').trim()}; }).filter(function(x){ return x.no||x.expiry||x.nationality; });
+        } else {
+          var _pno=_clean(cols[6]), _pexp=_clean(cols[7]);
+          _passports=(_pno||_pexp)?[{no:_pno,expiry:_pexp,nationality:_nat}]:[];
+        }
         d.people.push({
           id:id, name:name,
           role:(cols[2]||'').replace(/^"|"$/g,''),
-          nationality:(cols[3]||'').replace(/^"|"$/g,''),
+          nationality:_nat,
           status:(cols[4]||'Active').replace(/^"|"$/g,''),
           email:(cols[5]||'').replace(/^"|"$/g,''),
-          passport:{no:(cols[6]||'').replace(/^"|"$/g,''), expiry:(cols[7]||'').replace(/^"|"$/g,''), nationality:(cols[3]||'').replace(/^"|"$/g,'')},
+          passports:_passports,
+          passport:_ppPrimary(_passports)||{no:'',expiry:'',nationality:''},
           intDL:{no:(cols[8]||'').replace(/^"|"$/g,''), expiry:(cols[9]||'').replace(/^"|"$/g,'')},
           natDL:{no:(cols[10]||'').replace(/^"|"$/g,''), expiry:(cols[11]||'').replace(/^"|"$/g,'')},
           uaeVisa:{type:(cols[12]||'').replace(/^"|"$/g,''), expiry:(cols[13]||'').replace(/^"|"$/g,'')},
@@ -26435,17 +26553,20 @@ window.ptOpenPersonDetail = function(pid){
 
   var sColor={Active:'#22c55e','On Leave':'#F5C518',Contractor:'#60a5fa',Inactive:'rgba(255,255,255,.3)'}[p.status]||'rgba(255,255,255,.3)';
 
-  // Documents section
-  var docs=[
-    {label:'Passport',key:'passport',fields:['no','expiry','nationality']},
+  // Documents section — one card per passport (dual nationality), then licences & visas
+  var ppList = _ppList(p);
+  var docs = ppList.map(function(pp,i){
+    return {label:'Passport'+(ppList.length>1?' '+(i+1):''), obj:pp, fields:['no','expiry','nationality']};
+  });
+  docs = docs.concat([
     {label:'Int. Driving Licence',key:'intDL',fields:['no','expiry']},
     {label:'Nat. Driving Licence',key:'natDL',fields:['no','expiry']},
     {label:'UAE Visa',key:'uaeVisa',fields:['type','expiry']},
     {label:'Ukraine Visa',key:'ukraineVisa',fields:['expiry']}
-  ];
+  ]);
   var docHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   docs.forEach(function(doc){
-    var obj = p[doc.key]||{};
+    var obj = doc.obj || p[doc.key]||{};
     var exp = obj.expiry||'';
     var days = exp?Math.round((new Date(exp)-new Date())/86400000):null;
     var status = exp?(days<0?'expired':days<=90?'expiring':'valid'):'none';
